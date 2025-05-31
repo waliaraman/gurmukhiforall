@@ -2,153 +2,187 @@ const micButton = document.getElementById('micButton');
 const verseDisplay = document.getElementById('verseDisplay');
 let isRecording = false;
 let mediaRecorder;
-// let audioChunks = []; // We send chunks directly now for streaming
 let streamReference;
-let socket; // WebSocket variable
+let socket; // This will now be the Socket.IO client instance
 
+// Modify connectSocket to fully implement server event handlers
+const connectSocket = () => {
+    if (socket && socket.connected) {
+        // console.log('Socket.IO already connected.'); // Can be noisy
+        return socket;
+    }
+    const socketUrl = 'http://localhost:5001/api/audio_stream';
+    socket = io(socketUrl, {});
+    // console.log(`Attempting to connect to Socket.IO at ${socketUrl}`); // Can be noisy
+
+    socket.on('connect', () => {
+        console.log('Socket.IO: Connected successfully. SID:', socket.id);
+        verseDisplay.textContent = 'Connected. Ready to stream.';
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log('Socket.IO: Disconnected.', reason);
+        verseDisplay.textContent = 'Disconnected. Click Start to reconnect.';
+        isRecording = false;
+        micButton.textContent = 'Start Microphone';
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+        if (streamReference) {
+            streamReference.getTracks().forEach(track => track.stop());
+            streamReference = null;
+        }
+    });
+
+    socket.on('connect_error', (error) => {
+        console.error('Socket.IO: Connection Error.', error);
+        verseDisplay.textContent = 'Failed to connect. Ensure server is running & accessible.';
+        isRecording = false;
+        micButton.textContent = 'Start Microphone';
+    });
+
+    // To store the latest transcription for display with verse results
+    let latestTranscriptionForDisplay = "";
+
+    socket.on('transcription_update', (data) => {
+        console.log('Socket.IO: Received transcription_update:', data);
+        if (data && data.text) {
+            latestTranscriptionForDisplay = data.text;
+            verseDisplay.innerHTML = `
+                <p><strong>Live Transcription (Socket.IO):</strong> ${latestTranscriptionForDisplay}</p>
+                <p><em>Searching for verse...</em></p>
+            `;
+        }
+    });
+
+    socket.on('verse_update', (data) => {
+        console.log('Socket.IO: Received verse_update:', data);
+        if (data && data.data) { // Assuming backend sends { type: "verse_update", data: verse_object, source: "SocketIO"}
+            const verse = data.data;
+            verseDisplay.innerHTML = `
+                <h3>Verse Found (Socket.IO Stream)</h3>
+                <p><strong>Gurmukhi:</strong> ${verse.verse_gurmukhi}</p>
+                <p><strong>Meaning:</strong> ${verse.meaning_english}</p>
+                <p><strong>Source:</strong> ${verse.source_page}</p>
+                <hr>
+                <p><small><em>Based on transcription (Socket.IO): ${latestTranscriptionForDisplay}</em></small></p>
+            `;
+        }
+    });
+
+    socket.on('processing_error', (data) => {
+        console.error('Socket.IO: Received processing_error from backend:', data);
+        if (data && data.message) {
+            verseDisplay.innerHTML = `<p style="color: red;">Server Error: ${data.message}</p>`;
+        } else {
+            verseDisplay.innerHTML = `<p style="color: red;">An unspecified server error occurred.</p>`;
+        }
+    });
+
+    // Example of handling a custom ack from server on connect if implemented
+    // socket.on('connection_ack', (data) => {
+    //     console.log('Socket.IO: Connection acknowledged by server:', data.message);
+    // });
+
+    return socket;
+};
+
+
+// Modify micButton event listener
 micButton.addEventListener('click', async () => {
     if (!isRecording) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamReference = stream;
             console.log('Microphone access granted');
-            micButton.textContent = 'Stop Microphone';
-            isRecording = true;
-            verseDisplay.textContent = 'Connecting to WebSocket...';
 
-            // Establish WebSocket connection
-            socket = new WebSocket('ws://localhost:5001/api/audio_stream'); // Ensure port matches backend
+            isRecording = true; // Set recording state first
+            micButton.textContent = 'Stop Microphone'; // Update button text
 
-            socket.onopen = () => {
-                console.log('WebSocket connection established.');
-                verseDisplay.textContent = 'Recording... Speak into microphone (streaming).';
+            if (!socket || !socket.connected) {
+                verseDisplay.textContent = 'Connecting to server...';
+                socket = connectSocket(); // Initialize or get existing socket
 
-                // Start MediaRecorder
-                // Options to match typical streaming scenarios, like Opus in WebM
-                const options = { mimeType: 'audio/webm;codecs=opus' };
-                try {
-                    mediaRecorder = new MediaRecorder(stream, options);
-                } catch (e) {
-                    console.warn("Opus over WebM not supported, falling back to default", e);
-                    mediaRecorder = new MediaRecorder(stream); // Fallback to default
-                }
-
-
-                mediaRecorder.ondataavailable = event => {
-                    if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
-                        console.log('Sending audio chunk over WebSocket:', event.data);
-                        socket.send(event.data);
+                // Wait for connection before starting MediaRecorder
+                // Use a flag to ensure startLocalMediaRecording is called only once per connect sequence
+                let mediaRecorderStarted = false;
+                socket.once('connect', () => {
+                    if (!mediaRecorderStarted) {
+                        console.log("Socket.IO connected, proceeding to start MediaRecorder.");
+                        verseDisplay.textContent = 'Recording (Socket.IO)... Speak into mic.';
+                        startLocalMediaRecording(stream);
+                        mediaRecorderStarted = true;
                     }
-                };
-
-                mediaRecorder.onstop = () => { // This onstop is for the MediaRecorder itself
-                    console.log('MediaRecorder stopped.');
-                    if (streamReference) { // Ensure tracks are stopped if not already
-                        streamReference.getTracks().forEach(track => track.stop());
-                        streamReference = null;
-                    }
-                };
-
-                // Start recording with a timeslice to get chunks, e.g., every second
-                mediaRecorder.start(1000);
-                console.log('MediaRecorder started with 1s timeslice.');
-            };
-
-            // Keep a variable to store the latest transcription to display alongside verse
-            let latestTranscription = "";
-
-            socket.onmessage = event => {
-                try {
-                    const messageData = JSON.parse(event.data);
-                    console.log('WebSocket received JSON message:', messageData);
-
-                    if (messageData.type === 'transcription_update' && messageData.text) {
-                        latestTranscription = messageData.text;
-                        verseDisplay.innerHTML = `
-                            <p><strong>Live Transcription (Placeholder):</strong> ${latestTranscription}</p>
-                            <p><em>Searching for verse...</em></p>
-                        `;
-                    } else if (messageData.type === 'verse_update' && messageData.data) {
-                        const verse = messageData.data;
-                        verseDisplay.innerHTML = `
-                            <h3>Verse Found (Streamed Placeholder)</h3>
-                            <p><strong>Gurmukhi:</strong> ${verse.verse_gurmukhi}</p>
-                            <p><strong>Meaning:</strong> ${verse.meaning_english}</p>
-                            <p><strong>Source:</strong> ${verse.source_page}</p>
-                            <hr>
-                            <p><small><em>Based on transcription (Placeholder): ${latestTranscription}</em></small></p>
-                        `;
-                    } else if (messageData.type === 'error' && messageData.message) {
-                        console.error('Backend error message:', messageData.message);
-                        verseDisplay.innerHTML = `<p style="color: red;">Error from backend: ${messageData.message}</p>`;
-                    } else {
-                        console.log('WebSocket received other data:', event.data);
-                    }
-                } catch (e) {
-                    console.warn('WebSocket received non-JSON message or processing error:', event.data, e);
-                    if (event.data instanceof Blob) {
-                        console.log('WebSocket received Blob (likely echo, ignoring). Size:', event.data.size);
-                    }
+                });
+                // If already connected from a previous session (e.g. page not reloaded),
+                // or if connectSocket() immediately connects (less likely for new connections):
+                if (socket && socket.connected && !mediaRecorderStarted) {
+                     console.log("Socket.IO already connected (or connected very quickly), proceeding to start MediaRecorder.");
+                     verseDisplay.textContent = 'Recording (Socket.IO)... Speak into mic.';
+                     startLocalMediaRecording(stream);
+                     mediaRecorderStarted = true;
                 }
-            };
-
-            socket.onerror = error => {
-                console.error('WebSocket error:', error);
-                verseDisplay.textContent = 'WebSocket error. See console for details.';
-                isRecording = false;
-                micButton.textContent = 'Start Microphone';
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
-                }
-                 if (streamReference) {
-                    streamReference.getTracks().forEach(track => track.stop());
-                    streamReference = null;
-                }
-            };
-
-            socket.onclose = event => {
-                console.log('WebSocket connection closed:', event.code, event.reason);
-                if (isRecording) { // If closed unexpectedly
-                    verseDisplay.textContent = 'WebSocket closed. Click Start to retry.';
-                    isRecording = false;
-                    micButton.textContent = 'Start Microphone';
-                }
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
-                }
-                 if (streamReference) {
-                    streamReference.getTracks().forEach(track => track.stop());
-                    streamReference = null;
-                }
-            };
+            } else { // Socket already exists and is connected
+                 console.log("Socket.IO already connected, proceeding to start MediaRecorder.");
+                 verseDisplay.textContent = 'Recording (Socket.IO)... Speak into mic.';
+                 startLocalMediaRecording(stream);
+            }
 
         } catch (err) {
-            console.error('Error getting media or starting WebSocket:', err);
-            verseDisplay.textContent = 'Error setting up audio streaming. See console.';
-            isRecording = false;
+            console.error('Error getting media or starting recording:', err);
+            verseDisplay.textContent = 'Error setting up audio. See console.';
+            isRecording = false; // Reset state
             micButton.textContent = 'Start Microphone';
         }
     } else { // Stop recording
         micButton.textContent = 'Start Microphone';
         isRecording = false;
-        verseDisplay.textContent = 'Stopping recording...';
+        // verseDisplay.textContent = 'Stopping recording...'; // UI update handled by socket.disconnect or locally
 
         if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop(); // This will trigger ondataavailable for any remaining data, then onstop
+            mediaRecorder.stop();
+        } else { // If mediaRecorder wasn't even started or already stopped
+             if (streamReference) {
+                streamReference.getTracks().forEach(track => track.stop());
+                streamReference = null;
+            }
         }
 
-        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-            // Send a signal that client is stopping, or just close.
-            // For this iteration, just closing is fine. The backend will see ws.receive() return None.
-            console.log('Closing WebSocket connection.');
-            socket.close();
+        if (socket && socket.connected) {
+            console.log('Socket.IO: Emitting client_stopped_recording.');
+            socket.emit('client_stopped_recording', { reason: 'user_clicked_stop' });
+            // Optional: socket.disconnect(); // Or let server manage based on activity
         }
+        verseDisplay.textContent = 'Recording stopped (Socket.IO). Ready to start.';
+    }
+});
 
 
-        if (streamReference) { // Should be stopped by mediaRecorder.onstop or socket.onclose, but ensure
+function startLocalMediaRecording(stream) {
+    const options = { mimeType: 'audio/webm;codecs=opus' };
+    try {
+        mediaRecorder = new MediaRecorder(stream, options);
+    } catch (e) {
+        console.warn("Opus over WebM not supported, falling back to default", e);
+        mediaRecorder = new MediaRecorder(stream);
+    }
+
+    mediaRecorder.ondataavailable = event => {
+            if (event.data.size > 0 && socket && socket.connected) {
+            // console.log('Socket.IO: Sending audio chunk. Size:', event.data.size); // Can be verbose
+            socket.emit('audio_chunk', event.data);
+        }
+    };
+
+    mediaRecorder.onstop = () => {
+        console.log('MediaRecorder stopped.');
+        // Ensure mic is released if not already
+        if (streamReference) {
             streamReference.getTracks().forEach(track => track.stop());
             streamReference = null;
         }
-        verseDisplay.textContent = 'Recording stopped. Ready to start again.';
-    }
-});
+        // UI is typically updated by the main stop recording logic or disconnect handler
+    };
+
+    mediaRecorder.start(1000); // Start with timeslice
+}

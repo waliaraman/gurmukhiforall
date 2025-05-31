@@ -5,10 +5,10 @@
 This project aims to display verses being read by a Granthi in a Gurdwara on a projector, along with their meanings in real-time (eventually). The system involves capturing audio, transcribing it to Gurmukhi text, finding the corresponding verse in a database using text embeddings, and displaying the verse and its meaning on a frontend.
 
 Key Technologies:
-*   Frontend: HTML, JavaScript
-*   Backend: Python, Flask, Flask-CORS
-*   WebSocket Communication: Flask-Sockets
-*   WSGI Server (for WebSockets): Gunicorn with Gevent
+*   Frontend: HTML, JavaScript, Socket.IO Client
+*   Backend: Python, Flask, Flask-CORS, Flask-SocketIO
+*   Async Model (Backend): Gevent
+*   WSGI Server (for production): Gunicorn
 *   (Placeholders for ASR, Embedding, Search)
 
 ## Current Status
@@ -36,7 +36,7 @@ Follow these steps to set up and run the project on your local machine.
 
 ### 1. Backend Setup & Execution
 
-The backend is a Python Flask application that now includes WebSocket support for real-time audio streaming.
+The backend is a Python Flask application integrated with Flask-SocketIO for real-time communication.
 
 1.  **Navigate to the backend directory:**
     ```bash
@@ -46,72 +46,73 @@ The backend is a Python Flask application that now includes WebSocket support fo
     ```bash
     python -m venv venv
     ```
-2.  **Create and activate a Python virtual environment** (if not already done - see previous README version for details).
-3.  **Install dependencies (including Gunicorn and Gevent):**
+2.  **Create and activate a Python virtual environment** (if not already done).
+3.  **Install dependencies (including Flask-SocketIO, Gevent, Gunicorn):**
     ```bash
     pip install -r requirements.txt
     ```
-4.  **Run the Backend Server with Gunicorn (Recommended for WebSockets):**
-    To enable WebSocket functionality for audio streaming, run the backend using Gunicorn with a Gevent worker:
-    ```bash
-    gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 main:app -b 0.0.0.0:5001
-    ```
-    *   Replace `5001` with your desired port if you changed it in `main.py`.
-    *   This command starts the server, and you'll see Gunicorn logs in the terminal. The backend is now ready to accept both HTTP requests (on `/api/audio`) and WebSocket connections (on `/api/audio_stream`).
-
-5.  **Alternative: Running with Flask's Development Server (HTTP Only):**
-    You can still run the backend with `python main.py` (which internally uses `app.run(...)`):
+4.  **Run the Backend Server for Development:**
+    The primary way to run the backend for development, supporting WebSockets via Flask-SocketIO:
     ```bash
     python main.py
     ```
-    However, **this method will only serve the standard HTTP routes (like the original `/api/audio` for file uploads). The WebSocket endpoint (`/api/audio_stream`) will NOT function correctly with the Flask development server.** Use Gunicorn (as described above) for testing streaming features.
+    *   This uses `socketio.run(app, ...)` internally, which starts a development server (often Werkzeug with Gevent if available) capable of handling both HTTP and Socket.IO traffic. By default, it should run on `http://localhost:5001`.
+
+5.  **Alternative: Running with Gunicorn (for Production-like Environment):**
+    For a more production-like setup, or if you prefer Gunicorn:
+    ```bash
+    gunicorn --worker-class gevent -w 1 main:app -b 0.0.0.0:5001
+    ```
+    *   Ensure `async_mode='gevent'` is set in `SocketIO(app, ...)` in `main.py` for this to work optimally.
+    *   Replace `5001` with your desired port if changed.
 
 **Note on Port Conflicts (Especially Port 5000/5001):**
 The default port used in `main.py` is `5001`. If this port is in use by another service on your system (e.g., the "Control Center" on macOS Monterey and later, or other applications).
 If you encounter errors like "address already in use" when starting the Gunicorn or Flask server, or if the server seems to start but is unresponsive, try using a different port:
 1.  Open `backend/main.py`.
-2.  Find the line `app.run(debug=True, port=5001, host='0.0.0.0')` or the Gunicorn command.
+2.  Find the line `socketio.run(app, host='0.0.0.0', port=5001, ...)` or the Gunicorn command.
 3.  Change the port in `main.py` and/or in the Gunicorn command (e.g., to `5002`).
-    For `main.py`:
+    For `main.py` (via `socketio.run`):
     ```python
-    app.run(debug=True, port=5002, host='0.0.0.0')
+    socketio.run(app, host='0.0.0.0', port=5002, debug=True, use_reloader=True)
     ```
     For Gunicorn:
     ```bash
-    gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 main:app -b 0.0.0.0:5002
+    gunicorn --worker-class gevent -w 1 main:app -b 0.0.0.0:5002
     ```
 4.  Save the file and try running the server again.
-5.  **Important:** If you change the backend port, you **must** also update the WebSocket URL (`ws://...`) and `fetch` URL in `frontend/app.js`. See the note below.
+5.  **Important:** If you change the backend port, you **must** also update the Socket.IO connection URL (`http://...` for Socket.IO client) and any `fetch` URLs in `frontend/app.js`. See the note below.
 
 ### 2. Frontend Setup & Execution
 
-The frontend consists of static HTML and JavaScript files.
+The frontend consists of static HTML and JavaScript files and uses the Socket.IO client library.
 
-1.  **Open a new terminal window/tab.**
+1.  **Ensure Socket.IO Client is Included:**
+    The `frontend/index.html` file should include the Socket.IO client library script (e.g., from a CDN) in its `<head>` or before the closing `</body>` tag. Example:
+    ```html
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    ```
 2.  **Navigate to the frontend directory:**
     ```bash
     cd frontend
     ```
 3.  **Serve the frontend using a local HTTP server:**
-    For microphone access (`navigator.mediaDevices.getUserMedia`) to work correctly, the HTML page needs to be served over HTTP/S, not just opened as a local file (`file:///...`). Python's built-in HTTP server is convenient for this.
     ```bash
     python -m http.server 8080
     ```
-    (You can use any port other than 5000 if it's free, e.g., 8000, 8080).
+    (Or your preferred port).
 4.  **Access the frontend in your web browser:**
-    Open your web browser and go to `http://localhost:8080` (or the port you chose).
+    Open `http://localhost:8080`.
 
 **Important: Matching Backend URL in Frontend Code**
-The frontend JavaScript (`frontend/app.js`) needs to know the correct URL for both the backend API (HTTP POST) and the WebSocket server.
-By default:
-*   HTTP `fetch` connects to `/api/audio` (relative path, assumes same host and port as frontend is served on, but will target backend port due to browser same-origin policy for fetch if backend runs on different port and CORS is set up). For clarity, the example below will use an absolute path.
-*   WebSocket connects to `ws://localhost:5001/api/audio_stream`.
+The frontend JavaScript (`frontend/app.js`) needs to know the correct URL for the Socket.IO server.
+By default, it attempts to connect to `http://localhost:5001/api/audio_stream` for Socket.IO.
 
 1.  Open `frontend/app.js`.
-2.  **For WebSocket:** Find the line `socket = new WebSocket('ws://localhost:5001/api/audio_stream');`. Ensure the hostname and port (`localhost:5001`) match your Gunicorn server.
-3.  **For HTTP Fallback (if used):** Find any `fetch` calls (e.g., if you re-enable the old POST method). Ensure the URL matches. Example: `fetch('http://localhost:5001/api/audio', { ... });`
+2.  Find the line `const socketUrl = 'http://localhost:5001/api/audio_stream';`. Ensure the hostname and port match your backend server (whether run via `python main.py` or Gunicorn).
+3.  If you are also using the HTTP POST fallback (`/api/audio`), ensure its `fetch` URL is also correct.
 
-Make sure these URLs are correct before testing, especially the WebSocket URL.
+Make sure these URLs are correct before testing.
 
 ### 3. Testing the Application
 
@@ -127,25 +128,25 @@ Make sure these URLs are correct before testing, especially the WebSocket URL.
     *   You should see a status message like `Sending audio to backend...`.
 7.  **Observe the display area:**
     After a short delay (simulating processing), the display area should update to show:
-    *   Initially, "Live Transcription (Placeholder): [some Gurmukhi text]" and "Searching for verse...".
-    *   Then, it should update to "Verse Found (Streamed Placeholder)" with Gurmukhi, Meaning, Source, and the "Based on transcription..." text.
-8.  **Check your terminal console for the backend (Gunicorn server):**
+    *   Initially, "Live Transcription (Socket.IO): [some Gurmukhi text]" and "Searching for verse...".
+    *   Then, it should update to "Verse Found (Socket.IO Stream)" with Gurmukhi, Meaning, Source, and the "Based on transcription (Socket.IO)..." text.
+8.  **Check your terminal console for the backend (run with `python main.py` or Gunicorn):**
     You should see log messages indicating:
-    *   WebSocket connection established.
-    *   Messages about receiving audio chunks, saving temporary files, and sending transcription/verse updates.
-    *   (If you test the HTTP POST route `/api/audio` separately, you'll see logs for that too).
+    *   "Client connected to Socket.IO namespace..."
+    *   Messages about receiving audio chunks, (e.g., "Socket.IO (audio_chunk from ...): Received audio chunk..."), saving temporary files, and sending transcription/verse updates via Socket.IO.
+    *   (If you test the HTTP POST route `/api/audio` separately, you'll see standard Flask logs for that).
 9.  **Check your browser's developer console:**
     You should see logs from `app.js`:
-    *   "WebSocket connection established."
-    *   "Sending audio chunk over WebSocket..."
-    *   "WebSocket received JSON message: {type: 'transcription_update', ...}"
-    *   "WebSocket received JSON message: {type: 'verse_update', ...}"
+    *   "Socket.IO: Connected successfully..."
+    *   "Socket.IO: Sending audio chunk..." (if you uncommented this log in `ondataavailable`)
+    *   "Socket.IO: Received transcription_update: {type: 'transcription_update', ...}"
+    *   "Socket.IO: Received verse_update: {type: 'verse_update', ...}"
 
-This completes a test of the end-to-end streaming placeholder flow.
+This completes a test of the end-to-end streaming placeholder flow using Socket.IO.
 
 ## Current Features
-*   **Real-time Audio Streaming (Placeholder):** Captures microphone audio, streams it to the backend via WebSockets, and receives (placeholder) transcriptions and verse lookups in real-time.
-*   **Batch Audio Upload (Placeholder):** Still supports uploading a complete audio file via HTTP POST for (placeholder) processing (if `/api/audio` route is kept active and tested separately).
+*   **Real-time Audio Streaming (Placeholder via Socket.IO):** Captures microphone audio, streams it to the backend using Socket.IO events, and receives (placeholder) transcriptions and verse lookups in real-time.
+*   **Batch Audio Upload (Placeholder via HTTP POST):** Still supports uploading a complete audio file for (placeholder) processing.
 
 
 ## Future Development
