@@ -11,9 +11,12 @@ const connectSocket = () => {
         // console.log('Socket.IO already connected.'); // Can be noisy
         return socket;
     }
-    const socketUrl = 'http://localhost:5001/api/audio_stream';
-    socket = io(socketUrl, {});
-    // console.log(`Attempting to connect to Socket.IO at ${socketUrl}`); // Can be noisy
+    // Connect to the Socket.IO server, specifically to the namespace
+    // Path relative to current host/port
+    socket = io('/api/audio_stream', {
+        // Optional: transports: ['websocket'], // Can be useful for consistency
+    });
+    console.log('Attempting to connect to Socket.IO namespace /api/audio_stream on current host.');
 
     socket.on('connect', () => {
         console.log('Socket.IO: Connected successfully. SID:', socket.id);

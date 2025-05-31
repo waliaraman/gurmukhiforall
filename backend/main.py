@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import os
@@ -16,6 +16,15 @@ if not os.path.exists(UPLOAD_FOLDER):
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # --- Updated Placeholder Functions ---
+
+# --- Serve Frontend ---
+@app.route('/')
+def serve_index():
+    # This will serve 'backend/static/index.html'
+    # Flask's default static_folder is 'static'.
+    # Ensure index.html references <script src="js/app.js"> or similar relative path.
+    return send_from_directory(app.static_folder, 'index.html')
+
 def transcribe_audio_placeholder(audio_filepath, source="Unknown"):
     print(f"ASR Placeholder ({source}): Simulating transcription for {audio_filepath}...")
     time.sleep(0.5)
@@ -45,9 +54,7 @@ def search_similar_verse_placeholder(embedding, source="Unknown"):
     return found_verse
 
 # --- HTTP Routes (remain unchanged) ---
-@app.route('/')
-def home():
-    return "Backend is running (HTTP)!"
+# The previous @app.route('/') for "Backend is running (HTTP)!" is replaced by serve_index.
 
 @app.route('/api/audio', methods=['POST'])
 def process_audio_http():
@@ -207,6 +214,7 @@ def handle_client_stopped(data): # Data can be None or a JSON object
 
 if __name__ == '__main__':
     print("Starting Flask-SocketIO server on host 0.0.0.0, port 5001...")
+    print("Frontend will be served from http://localhost:5001/")
     # Use socketio.run for development. This will use the Werkzeug development server
     # if gevent is not installed, or gevent if it is (preferred for Socket.IO).
     # For production, Gunicorn with gevent is recommended (see README).
