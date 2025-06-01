@@ -7,13 +7,51 @@ This project aims to display verses being read by a Granthi in a Gurdwara on a p
 Key Technologies:
 *   Frontend: HTML, JavaScript, Socket.IO Client
 *   Backend: Python, Flask, Flask-CORS, Flask-SocketIO
+*   ASR: Google Cloud Speech-to-Text
 *   Async Model (Backend): Gevent
 *   WSGI Server (for production): Gunicorn
-*   (Placeholders for ASR, Embedding, Search)
+*   (Placeholders for Embedding, Search)
 
 ## Current Status
 
-**Initial Placeholder Version:** This version has the basic web application structure with frontend and backend components. Core functionalities like Speech-to-Text (ASR), text embedding, and database search are currently implemented as **placeholders** that simulate the process with hardcoded data. This allows for testing the end-to-end flow of the application.
+**Alpha - Real ASR Implemented (Placeholders for Search):** This version integrates real-time Automatic Speech Recognition (ASR) using **Google Cloud Speech-to-Text** for Punjabi (India) / Gurmukhi. Audio is streamed from the client to the backend via Socket.IO, transcribed, and the text is displayed. Text embedding and verse search functionalities are currently **placeholders** that simulate the process with hardcoded data after receiving a final ASR transcript. The frontend is served directly by the Flask backend.
+
+## Prerequisites
+
+Before running the application with real Automatic Speech Recognition (ASR), you need to set up Google Cloud Speech-to-Text:
+
+1.  **Google Cloud Platform (GCP) Project:**
+    *   Ensure you have a GCP project created.
+    *   If not, create one at [https://console.cloud.google.com/](https://console.cloud.google.com/).
+2.  **Enable Cloud Speech-to-Text API:**
+    *   In your GCP project, navigate to the "APIs & Services" > "Library".
+    *   Search for "Cloud Speech-to-Text API" and enable it.
+3.  **Create Service Account & Download JSON Key:**
+    *   Go to "IAM & Admin" > "Service Accounts" in your GCP project.
+    *   Click "Create Service Account".
+    *   Provide a name (e.g., `gurdwara-asr-client`).
+    *   Grant the role "Cloud Speech Service Agent" (or a role that includes `speech.recognize` permissions).
+    *   Create the service account, then select it. Go to the "Keys" tab.
+    *   Click "Add Key" > "Create new key". Choose "JSON" and download the key file. **Store this file securely.**
+4.  **Set Environment Variable:**
+    *   The application uses Google Cloud's client libraries, which automatically find credentials via the `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+    *   In the terminal session where you will run the backend (`python backend/main.py`), set this variable to the absolute path of the JSON key file you downloaded.
+        *   **macOS/Linux:**
+            ```bash
+            export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/keyfile.json"
+            ```
+        *   **Windows (PowerShell):**
+            ```powershell
+            $env:GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/keyfile.json"
+            ```
+        *   **Windows (CMD):**
+            ```cmd
+            set GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/keyfile.json"
+            ```
+        *   Replace `/path/to/your/keyfile.json` with the actual path.
+        *   **Important:** This variable needs to be set every time you start a new terminal session to run the backend, unless you add it to your shell's profile (e.g., `.bashrc`, `.zshrc`, PowerShell Profile).
+
+**Note on Costs:** Google Cloud Speech-to-Text is a paid service, though it has a generous free tier. Be mindful of usage to avoid unexpected charges. See [Google Cloud Speech-to-Text Pricing](https://cloud.google.com/speech-to-text/pricing) for details.
 
 ## Directory Structure
 ```
@@ -89,6 +127,8 @@ Since Flask now serves the frontend:
 
 ## Testing the Application
 
+**Important:** Ensure you have completed the **Prerequisites** section above and have the `GOOGLE_APPLICATION_CREDENTIALS` environment variable set correctly in your backend terminal session before running the application for ASR testing.
+
 1.  **Ensure the application server is running** using one of the methods described in "Running the Application Locally" (e.g., `python backend/main.py`).
 2.  **Access the application** in your browser at `http://localhost:5001/` (or the port you configured).
 3.  **Open your browser's Developer Console** (usually by pressing F12 or Right-click -> Inspect, then select the Console and Network tabs).
@@ -96,10 +136,11 @@ Since Flask now serves the frontend:
 4.  **Click the "Start Microphone" button.** Your browser will likely ask for permission to use your microphone. **Allow** it.
     *   The UI should indicate connection ("Connected. Ready to stream.") and then "Recording (Socket.IO)... Speak into mic.".
     *   The backend terminal (where you ran `python main.py` or Gunicorn) should show a log message like "Client connected to Socket.IO namespace...".
-5.  **Speak for several seconds.**
-    *   The UI in the browser should display "Live Transcription (Socket.IO): ..." followed by "Verse Found (Socket.IO Stream)...", updating as the backend processes audio chunks.
-    *   The browser's Developer Console will show Socket.IO messages being sent and received (e.g., "Socket.IO: Received transcription_update...", "Socket.IO: Received verse_update...").
-    *   The backend terminal will show logs for audio chunk reception, processing, and event emissions.
+5.  **Speak clearly in Punjabi (or English, as per language code if changed).**
+    *   The UI should display live interim transcriptions from Google Cloud Speech-to-Text, followed by final transcriptions.
+    *   After a final transcription, the UI should then update with "(Placeholder) Verse Found..." based on this real transcript.
+    *   Browser console will show Socket.IO messages, including the detailed ASR response objects.
+    *   Backend terminal will show logs from the Google ASR stream, including received transcripts, and then calls to the placeholder embedding and search functions.
 6.  **Click "Stop Microphone."**
     *   The UI should update to indicate recording has stopped (e.g., "Recording stopped (Socket.IO). Ready to start.").
     *   The backend terminal should log the `client_stopped_recording` event and any final processing.
