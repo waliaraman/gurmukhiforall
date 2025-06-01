@@ -1,0 +1,44 @@
+# Database Schema for Gurdwara Verse Projection
+
+## Table: Verses
+Description: Stores the sacred verses (e.g., from Guru Granth Sahib Ji).
+
+Columns:
+    - verse_id: INTEGER, PRIMARY KEY, AUTOINCREMENT
+    - gurmukhi_text: TEXT, NOT NULL (The verse text in Gurmukhi script)
+    - roman_phonetic: TEXT (Roman transliteration of the verse)
+    - source_page: INTEGER (e.g., Ang (page number) in Guru Granth Sahib Ji)
+    # - other relevant metadata like Raag, Author, etc. can be added.
+
+## Table: Meanings
+Description: Stores meanings/translations of the verses in various languages.
+
+Columns:
+    - meaning_id: INTEGER, PRIMARY KEY, AUTOINCREMENT
+    - verse_id: INTEGER, FOREIGN KEY (references Verses.verse_id)
+    - language: TEXT, NOT NULL (e.g., 'en' for English, 'pa' for Punjabi)
+    - meaning_text: TEXT, NOT NULL (The actual meaning/translation)
+
+## Table: VerseEmbeddings
+Description: Stores the vector embeddings for each verse for similarity search.
+             In a real system, this might be handled by a specialized vector database
+             or a table with a blob/array type if the main DB supports it well.
+
+Columns:
+    - embedding_id: INTEGER, PRIMARY KEY, AUTOINCREMENT
+    - verse_id: INTEGER, FOREIGN KEY (references Verses.verse_id), UNIQUE
+    - embedding_vector: TEXT or BLOB (Storing the embedding. For text, it could be a JSON string of a list of floats.
+                        A dedicated vector type would be ideal in a production DB like PostgreSQL with pgvector, or a vector DB.)
+    - embedding_model_version: TEXT (Version of the model used to generate the embedding)
+
+# --- Initial Data Population Notes ---
+# - Verses and meanings would need to be sourced from reliable Gurbani databases/APIs.
+# - Embeddings would be pre-generated for all verses using a suitable sentence transformer model
+#   trained or fine-tuned for Gurmukhi/Indic languages.
+
+# --- Query Notes ---
+# - When new text is transcribed, it's converted to an embedding.
+# - This new embedding is compared against all embeddings in VerseEmbeddings
+#   using cosine similarity or another distance metric.
+# - The verse_id with the highest similarity is retrieved.
+# - The corresponding verse_text and its meanings are then fetched.
