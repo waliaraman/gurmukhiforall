@@ -45,30 +45,45 @@ const connectSocket = () => {
     });
 
     // To store the latest transcription for display with verse results
-    let latestTranscriptionForDisplay = "";
+    let latestFinalTranscription = ""; // Store the latest final transcript
+    let currentInterimTranscription = ""; // Store the current interim transcript
 
     socket.on('transcription_update', (data) => {
         console.log('Socket.IO: Received transcription_update:', data);
-        if (data && data.text) {
-            latestTranscriptionForDisplay = data.text;
-            verseDisplay.innerHTML = `
-                <p><strong>Live Transcription (Socket.IO):</strong> ${latestTranscriptionForDisplay}</p>
-                <p><em>Searching for verse...</em></p>
-            `;
+        if (data && typeof data.text === 'string') {
+            if (data.is_final) {
+                latestFinalTranscription = data.text; // Or append: latestFinalTranscription += data.text + " ";
+                currentInterimTranscription = ""; // Clear interim
+
+                // Update UI to show final transcript and prepare for verse search
+                verseDisplay.innerHTML = `
+                    <p><strong>Final Transcription:</strong> ${latestFinalTranscription}</p>
+                    <p><em>(Verse search will be based on this)</em></p>
+                `;
+                // The verse_update event from backend will follow if a verse is found
+            } else {
+                // Interim result, update ongoing transcription display
+                currentInterimTranscription = data.text;
+                verseDisplay.innerHTML = `
+                    <p><em>Translating: ${currentInterimTranscription} ... (stability: ${data.stability ? data.stability.toFixed(2) : 'N/A'})</em></p>
+                    ${latestFinalTranscription ? `<p><small>Previous final: ${latestFinalTranscription}</small></p>` : ""}
+                `;
+            }
         }
     });
 
     socket.on('verse_update', (data) => {
         console.log('Socket.IO: Received verse_update:', data);
-        if (data && data.data) { // Assuming backend sends { type: "verse_update", data: verse_object, source: "SocketIO"}
+        if (data && data.data) {
             const verse = data.data;
+            // Display verse with the final transcription that triggered it
             verseDisplay.innerHTML = `
-                <h3>Verse Found (Socket.IO Stream)</h3>
+                <h3>Verse Found (Google ASR Stream)</h3>
                 <p><strong>Gurmukhi:</strong> ${verse.verse_gurmukhi}</p>
                 <p><strong>Meaning:</strong> ${verse.meaning_english}</p>
                 <p><strong>Source:</strong> ${verse.source_page}</p>
                 <hr>
-                <p><small><em>Based on transcription (Socket.IO): ${latestTranscriptionForDisplay}</em></small></p>
+                <p><small><em>Based on final transcription: ${latestFinalTranscription}</em></small></p>
             `;
         }
     });
